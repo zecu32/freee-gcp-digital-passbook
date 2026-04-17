@@ -1,2 +1,2 @@
 
-freee APIとGCPを連携させた次世代デ
+freee APIとGCPを連携させた次世代デジタル通帳
