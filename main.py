@@ -92,6 +92,7 @@ class DigitalPassbookSync:
             f"🚀 **アプリ更新**: {app_time}\n"
             f"━━━━━━━━━━━━━━━\n"
             f"🔗 [freee ログイン](<https://secure.freee.co.jp/>)\n"
+            f"📊 [Firestore DB](<https://console.cloud.google.com/firestore/data?project=my-project-52145-364803>)\n"
             f"🛠️ [GitHub Repo](<https://github.com/zecu32/freee-gcp-digital-passbook>)"
         )
         
