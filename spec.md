@@ -10,10 +10,10 @@ Firestoreの階層構造およびフィールド定義です。
     |-- (fields: name, display_name)
     |
     ┗-- /bank_accounts/{account_id}
-            |-- (fields: bank_name, type, last_synced)
+            |-- (fields: bank_name, type)
             |
             ┗-- /transactions/{transaction_id}
-                    |-- (今ここがメイン)
+                    |-- (Core Data)
 ```
 
 ### コレクション詳細
@@ -35,14 +35,21 @@ Firestoreの階層構造およびフィールド定義です。
 
 ---
 
-## 2. API連携フロー
+## 2. API連携および通知フロー
 
 1. **認可初期化**: `authorize_freee.py` で認可URLを発行し、ブラウザで承認。
 2. **トークン取得**: 取得したコードを `get_token.py` に渡し、`tokens.json` を生成。
-3. **データ同期**: `main.py` を実行し、freee APIから最新明細を取得。
-4. **永続化**: 取得した明細を Firestore へ保存（ドキュメントIDにより重複自動排除）。
+3. **データ同期**: `main.py` を実行。
+   - freee APIから最新明細を取得し、Firestoreへ保存。
+   - 既存データがある場合は `merge` モードで更新。
+4. **Discord通知**: 同期完了後、以下の情報を Discord Webhook へ送信。
+   - 同期件数、最新残高、銀行側の最終同期日時。
+   - freeeログインおよびリポジトリへのクイックアクセスリンク。
 
-## 3. 今後の拡張予定
+## 3. 同期仕様の注意点
+- **銀行同期日時**: APIの制限により、正確な時刻が取得できない場合は「日付」のみを表示する。
+- **重複排除**: freeeのユニークIDを使用しているため、何度 `main.py` を実行しても Firestore 内に重複データは作成されない。
+
+## 4. 今後の拡張予定
 - **自動同期**: Cloud Scheduler を用いた定期的な `main.py` の実行。
-- **通知機能**: 特定の金額以上の出金や入金があった際の通知機能。
-- **フロントエンド**: 保存されたFirestoreデータを可視化するUIの構築。
+- **フィルタリング通知**: 大額の入出金があった場合のみ強調通知する機能。
