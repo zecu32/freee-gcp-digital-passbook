@@ -2,3 +2,5 @@ google-cloud-firestore
 python-dotenv
 requests
 functions-framework
+gspread
+google-auth

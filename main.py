@@ -4,6 +4,8 @@ import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google.cloud import firestore
+import gspread
+import google.auth
 
 # .envファイルを読み込む (ローカル実行用)
 load_dotenv()
@@ -15,6 +17,7 @@ class DigitalPassbookSync:
         self.client_secret = os.getenv("FREEE_CLIENT_SECRET")
         self.project_id = os.getenv("GCP_PROJECT_ID")
         self.webhook_url = os.getenv("DISCORD_WEBHOOK_URL")
+        self.spreadsheet_id = os.getenv("SPREADSHEET_ID")
         
         self.company_id = os.getenv("FREEE_COMPANY_ID")
         self.company_name = os.getenv("FREEE_COMPANY_NAME")
@@ -25,12 +28,9 @@ class DigitalPassbookSync:
         self.tokens_doc_ref = self.db.collection("settings").document("freee_tokens")
 
     def _get_tokens(self):
-        """Firestoreからトークンを取得。無ければローカルのjsonから移行を試みる。"""
         doc = self.tokens_doc_ref.get()
         if doc.exists:
             return doc.to_dict()
-        
-        # Firestoreに無い場合、tokens.jsonからの移行
         if os.path.exists("tokens.json"):
             with open("tokens.json", "r", encoding="utf-8") as f:
                 tokens = json.load(f)
@@ -39,11 +39,9 @@ class DigitalPassbookSync:
         return None
 
     def _save_tokens(self, tokens):
-        """トークンをFirestoreに永続化"""
         self.tokens_doc_ref.set(tokens)
 
     def _refresh_access_token(self, refresh_token):
-        """リフレッシュトークンを使って新しいアクセストークンを取得"""
         url = "https://accounts.secure.freee.co.jp/public_api/token"
         payload = {
             "grant_type": "refresh_token",
@@ -51,40 +49,24 @@ class DigitalPassbookSync:
             "client_secret": self.client_secret,
             "refresh_token": refresh_token
         }
-        
         response = requests.post(url, data=payload)
         if response.status_code == 200:
             new_tokens = response.json()
-            # 新しいリフレッシュトークンも含まれるため、丸ごと保存
             self._save_tokens(new_tokens)
             print("トークンをリフレッシュしました。")
             return new_tokens["access_token"]
-        else:
-            print(f"リフレッシュ失敗: {response.text}")
-            return None
+        return None
 
     def fetch_with_auth(self, url, params=None):
-        """自動リフレッシュ機能付きのAPIリクエスト"""
         tokens = self._get_tokens()
         if not tokens: return None
-
-        headers = {
-            "Authorization": f"Bearer {tokens['access_token']}",
-            "FREEE-VERSION": "2022-04-01"
-        }
-
+        headers = {"Authorization": f"Bearer {tokens['access_token']}", "FREEE-VERSION": "2022-04-01"}
         response = requests.get(url, headers=headers, params=params)
-        
-        # 401エラー（期限切れ）の場合、リフレッシュして再試行
         if response.status_code == 401:
-            print("アクセストークンが期限切れです。リフレッシュを試みます...")
             new_access_token = self._refresh_access_token(tokens["refresh_token"])
             if new_access_token:
                 headers["Authorization"] = f"Bearer {new_access_token}"
                 response = requests.get(url, headers=headers, params=params)
-            else:
-                return None
-        
         return response
 
     def fetch_freee_transactions(self, days=30):
@@ -96,7 +78,6 @@ class DigitalPassbookSync:
             "start_date": (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d"),
             "end_date": datetime.now().strftime("%Y-%m-%d")
         }
-        
         response = self.fetch_with_auth(url, params=params)
         if response and response.status_code == 200:
             return response.json().get("wallet_txns", [])
@@ -105,7 +86,6 @@ class DigitalPassbookSync:
     def get_walletable_info(self):
         url = f"https://api.freee.co.jp/api/1/walletables"
         params = {"company_id": self.company_id}
-        
         response = self.fetch_with_auth(url, params=params)
         if response and response.status_code == 200:
             wallets = response.json().get("walletables", [])
@@ -113,9 +93,47 @@ class DigitalPassbookSync:
             return next((w for w in wallets if str(w["id"]) == target_id), {})
         return {}
 
+    def export_to_sheets(self):
+        """Firestoreから最新の明細リストを読み込み、Googleスプレッドシートへ書き出す"""
+        if not self.spreadsheet_id:
+            print("SPREADSHEET_ID が設定されていないためスキップします。")
+            return
+
+        try:
+            # 認証
+            credentials, _ = google.auth.default()
+            gc = gspread.authorize(credentials)
+            sh = gc.open_by_key(self.spreadsheet_id)
+            worksheet = sh.get_worksheet(0)
+
+            # Firestoreから全件取得 (日付の降順)
+            docs = self.db.collection("companies").document(str(self.company_id)) \
+                          .collection("bank_accounts").document(str(self.walletable_id)) \
+                          .collection("transactions").order_by("date", direction=firestore.Query.DESCENDING).stream()
+            
+            rows = [["ID", "日付", "摘要", "金額", "残高", "消込状況", "マッチングID", "Firestore更新日"]]
+            for doc in docs:
+                d = doc.to_dict()
+                rows.append([
+                    doc.id,
+                    d.get("date", ""),
+                    d.get("description", ""),
+                    d.get("amount", 0),
+                    d.get("balance", 0),
+                    d.get("matching_status", "unmatched"),
+                    d.get("matched_invoice_id", ""),
+                    d.get("updated_at").strftime("%Y-%m-%d %H:%M:%S") if d.get("updated_at") else ""
+                ])
+            
+            # シートのクリアと更新
+            worksheet.clear()
+            worksheet.update(rows, "A1")
+            print(f"スプレッドシート ({sh.title}) を更新しました（{len(rows)-1}件）。")
+        except Exception as e:
+            print(f"スプレッドシート更新エラー: {e}")
+
     def send_discord_notification(self, count, balance, last_sync_raw, app_time):
         if not self.webhook_url: return
-
         if last_sync_raw:
             formatted_sync = last_sync_raw.replace('T', ' ').split('+')[0].split('.')[0]
         else:
@@ -131,11 +149,10 @@ class DigitalPassbookSync:
             f"🕒 **銀行同期**: {formatted_sync}\n"
             f"🚀 **アプリ更新**: {app_time}\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"🔗 [freee ログイン](<https://secure.freee.co.jp/>)\n"
+            f"🟢 [Spreadsheet](<https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}>)\n"
             f"📊 [Firestore DB](<https://console.cloud.google.com/firestore/data?project={self.project_id}>)\n"
-            f"🛠️ [GitHub Repo](<https://github.com/zecu32/freee-gcp-digital-passbook>)"
+            f"🔗 [freee ログイン](<https://secure.freee.co.jp/>)"
         )
-        
         payload = {"content": content}
         requests.post(self.webhook_url, json=payload)
 
@@ -169,22 +186,27 @@ class DigitalPassbookSync:
 
     def run(self):
         app_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # 1. freee -> Firestore
         txns = self.fetch_freee_transactions()
         count = self.sync_to_firestore(txns)
         
+        # 2. Firestore -> スプレッドシート
+        self.export_to_sheets()
+        
+        # 3. 通知用情報の整理
         wallet_info = self.get_walletable_info()
         balance = wallet_info.get("walletable_balance")
         if balance is None:
             balance = txns[0].get("balance", 0) if txns else 0
-            
         last_sync = wallet_info.get("last_synced_at") or wallet_info.get("update_date")
         if not last_sync and txns:
             last_sync = txns[0].get("date")
             
+        # 4. 通知送信
         self.send_discord_notification(count, balance, last_sync, app_time)
-        print(f"同期成功: {count}件, 最終銀行同期: {last_sync}")
+        print(f"全工程完了: {count}件同期済み")
 
-# --- Cloud Functions 用のエントリポイント ---
 def sync_digital_passbook(request=None):
     sync_app = DigitalPassbookSync()
     sync_app.run()
