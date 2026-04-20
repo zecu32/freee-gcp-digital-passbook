@@ -91,8 +91,8 @@ class DigitalPassbookSync:
             f"🕒 **銀行同期**: {formatted_bank_sync}\n"
             f"🚀 **アプリ更新**: {app_time}\n"
             f"━━━━━━━━━━━━━━━\n"
-            f"🔗 [freee ログイン](https://secure.freee.co.jp/)\n"
-            f"🛠️ [GitHub Repo](https://github.com/zecu32/freee-gcp-digital-passbook)"
+            f"🔗 [freee ログイン](<https://secure.freee.co.jp/>)\n"
+            f"🛠️ [GitHub Repo](<https://github.com/zecu32/freee-gcp-digital-passbook>)"
         )
         
         payload = {"content": content}
