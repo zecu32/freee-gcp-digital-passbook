@@ -115,24 +115,31 @@ class DigitalPassbookSync:
                           .collection("bank_accounts").document(str(self.walletable_id)) \
                           .collection("transactions").order_by("date", direction=firestore.Query.ASCENDING).stream()
             
-            rows = [["ID", "日付", "摘要", "金額", "残高", "区分", "消込状況", "マッチングID", "Firestore更新日"]]
+            rows = [["ID", "日付", "摘要", "金額", "残高", "区分", "消込状況", "マッチングID", "アプリ最終同期"]]
             for doc in docs:
                 d = doc.to_dict()
                 amount = d.get("amount", 0)
-                # expense (出金) の場合は金額をマイナスにする
                 if d.get("entry_side") == "expense":
                     amount = -abs(amount)
                 
+                # 日本時間 (JST) に変換
+                updated_at = d.get("updated_at")
+                updated_at_str = ""
+                if updated_at:
+                    # UTCからJST(+9時間)に変換
+                    jst_time = updated_at + timedelta(hours=9)
+                    updated_at_str = jst_time.strftime("%Y-%m-%d %H:%M:%S")
+
                 rows.append([
                     doc.id,
                     d.get("date", ""),
                     d.get("description", ""),
                     amount,
                     d.get("balance", 0),
-                    d.get("entry_side", ""), # 収支区分
+                    d.get("entry_side", ""),
                     d.get("matching_status", "unmatched"),
                     d.get("matched_invoice_id", ""),
-                    d.get("updated_at").strftime("%Y-%m-%d %H:%M:%S") if d.get("updated_at") else ""
+                    updated_at_str
                 ])
             
             # シートのクリアと更新
