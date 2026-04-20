@@ -110,10 +110,10 @@ class DigitalPassbookSync:
             sh = gc.open_by_key(self.spreadsheet_id)
             worksheet = sh.get_worksheet(0)
 
-            # Firestoreから全件取得 (日付の降順)
+            # Firestoreから全件取得 (日付の昇順: 通帳形式)
             docs = self.db.collection("companies").document(str(self.company_id)) \
                           .collection("bank_accounts").document(str(self.walletable_id)) \
-                          .collection("transactions").order_by("date", direction=firestore.Query.DESCENDING).stream()
+                          .collection("transactions").order_by("date", direction=firestore.Query.ASCENDING).stream()
             
             rows = [["ID", "日付", "摘要", "金額", "残高", "区分", "消込状況", "マッチングID", "Firestore更新日"]]
             for doc in docs:
