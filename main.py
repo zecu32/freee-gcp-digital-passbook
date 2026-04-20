@@ -138,6 +138,17 @@ class DigitalPassbookSync:
             # シートのクリアと更新
             worksheet.clear()
             worksheet.update(rows, "A1")
+
+            # 金額列 (D列) のフォーマット設定: マイナスを赤字にする
+            # 形式: #,##0 (カンマ区切り) ; [Red]-#,##0 (マイナスは赤字)
+            worksheet.format("D2:D1000", {
+                "numberFormat": {
+                    "type": "NUMBER",
+                    "pattern": "#,##0;[Red]-#,##0"
+                },
+                "horizontalAlignment": "RIGHT"
+            })
+            
             print(f"スプレッドシート ({sh.title}) を更新しました（{len(rows)-1}件）。")
         except Exception as e:
             import traceback
