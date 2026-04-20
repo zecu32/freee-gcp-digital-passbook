@@ -1,4 +1,10 @@
 # Environment variables / Secrets
 .env
+tokens.json
+
+# Python
 __pycache__/
 *.pyc
+
+# Local environments
+.venv/
