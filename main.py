@@ -100,8 +100,12 @@ class DigitalPassbookSync:
             return
 
         try:
-            # 認証
-            credentials, _ = google.auth.default()
+            # 認証 (スプレッドシートとドライブのスコープを明示的に指定)
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets',
+                'https://www.googleapis.com/auth/drive'
+            ]
+            credentials, _ = google.auth.default(scopes=scopes)
             gc = gspread.authorize(credentials)
             sh = gc.open_by_key(self.spreadsheet_id)
             worksheet = sh.get_worksheet(0)
@@ -111,7 +115,7 @@ class DigitalPassbookSync:
                           .collection("bank_accounts").document(str(self.walletable_id)) \
                           .collection("transactions").order_by("date", direction=firestore.Query.DESCENDING).stream()
             
-            rows = [["ID", "日付", "摘要", "金額", "残高", "消込状況", "マッチングID", "Firestore更新日"]]
+            rows = [["ID", "日付", "摘要", "金額", "残高", "区分", "消込状況", "マッチングID", "Firestore更新日"]]
             for doc in docs:
                 d = doc.to_dict()
                 rows.append([
@@ -120,6 +124,7 @@ class DigitalPassbookSync:
                     d.get("description", ""),
                     d.get("amount", 0),
                     d.get("balance", 0),
+                    d.get("entry_side", ""), # 収支区分
                     d.get("matching_status", "unmatched"),
                     d.get("matched_invoice_id", ""),
                     d.get("updated_at").strftime("%Y-%m-%d %H:%M:%S") if d.get("updated_at") else ""
@@ -130,7 +135,9 @@ class DigitalPassbookSync:
             worksheet.update(rows, "A1")
             print(f"スプレッドシート ({sh.title}) を更新しました（{len(rows)-1}件）。")
         except Exception as e:
+            import traceback
             print(f"スプレッドシート更新エラー: {e}")
+            traceback.print_exc()
 
     def send_discord_notification(self, count, balance, last_sync_raw, app_time):
         if not self.webhook_url: return
@@ -151,7 +158,8 @@ class DigitalPassbookSync:
             f"━━━━━━━━━━━━━━━\n"
             f"🟢 [Spreadsheet](<https://docs.google.com/spreadsheets/d/{self.spreadsheet_id}>)\n"
             f"📊 [Firestore DB](<https://console.cloud.google.com/firestore/data?project={self.project_id}>)\n"
-            f"🔗 [freee ログイン](<https://secure.freee.co.jp/>)"
+            f"🔗 [freee ログイン](<https://secure.freee.co.jp/>)\n"
+            f"🛠️ [GitHub Repo](<https://github.com/zecu32/freee-gcp-digital-passbook>)"
         )
         payload = {"content": content}
         requests.post(self.webhook_url, json=payload)
