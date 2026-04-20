@@ -118,11 +118,16 @@ class DigitalPassbookSync:
             rows = [["ID", "日付", "摘要", "金額", "残高", "区分", "消込状況", "マッチングID", "Firestore更新日"]]
             for doc in docs:
                 d = doc.to_dict()
+                amount = d.get("amount", 0)
+                # expense (出金) の場合は金額をマイナスにする
+                if d.get("entry_side") == "expense":
+                    amount = -abs(amount)
+                
                 rows.append([
                     doc.id,
                     d.get("date", ""),
                     d.get("description", ""),
-                    d.get("amount", 0),
+                    amount,
                     d.get("balance", 0),
                     d.get("entry_side", ""), # 収支区分
                     d.get("matching_status", "unmatched"),
